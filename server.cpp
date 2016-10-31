@@ -16,7 +16,7 @@
 #include<stdarg.h>
 
 #define QUEUE_LEN 32 //maximum connection queue length
-#define BUF_SIZE 128
+#define BUF_SIZE 1280
 
 void Reaper(int sig){
     int status;
@@ -25,7 +25,7 @@ void Reaper(int sig){
 }
 
 int errno; //error number used for strerror()
-unsigned short  portbase = 0; //what's this?
+unsigned short portbase = 0; //what's this?
 
 int error_exit(const char *format, ...){
     va_list args; //list of arguments
@@ -73,12 +73,26 @@ int passive_sock(const char *service, const char *transport, int q_len){
 void TCP_echo(int sockfd){
     char buffer[BUF_SIZE];
 
+    sprintf(buffer, "****************************************\n");
+    errno = write(sockfd, buffer, strlen(buffer));
+    if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
+    sprintf(buffer, "** Welcome to the information server. **\n");
+    errno = write(sockfd, buffer, strlen(buffer));
+    if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
+    sprintf(buffer, "****************************************\n");
+    errno = write(sockfd, buffer, strlen(buffer));
+    if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
+    sprintf(buffer, "%");
+    errno = write(sockfd, buffer, strlen(buffer));
+    if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
+    
     while(errno = read(sockfd, buffer, BUF_SIZE)){
         if(errno < 0) error_exit("failed read(): %s\n", strerror(errno));
         else {
             printf("receive from client: ");
             fputs(buffer, stdout);
         }
+        sprintf(buffer, "%");
         errno = write(sockfd, buffer, strlen(buffer));
         if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
     }
@@ -118,7 +132,7 @@ int main(int argc, char *argv[]){
                     close(slave);
                     exit(0); //child processes terminate successfully
             default: //parent
-                     close(slave); //why?
+                     //close(slave); //why?
                      break;
         }
 
