@@ -16,7 +16,7 @@
 #include<stdarg.h>
 
 #define QUEUE_LEN 32 //maximum connection queue length
-#define BUF_SIZE 1280
+#define BUF_SIZE 30000
 
 void Reaper(int sig){
     int status;
@@ -71,29 +71,39 @@ int passive_sock(const char *service, const char *transport, int q_len){
 }
 
 void TCP_echo(int sockfd){
-    char buffer[BUF_SIZE];
+    char w_buffer[BUF_SIZE];
+    char r_buffer[BUF_SIZE];
 
-    sprintf(buffer, "****************************************\n");
-    errno = write(sockfd, buffer, strlen(buffer));
+    sprintf(w_buffer, "****************************************\n");
+    errno = write(sockfd, w_buffer, strlen(w_buffer));
     if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
-    sprintf(buffer, "** Welcome to the information server. **\n");
-    errno = write(sockfd, buffer, strlen(buffer));
+    sprintf(w_buffer, "** Welcome to the information server. **\n");
+    errno = write(sockfd, w_buffer, strlen(w_buffer));
     if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
-    sprintf(buffer, "****************************************\n");
-    errno = write(sockfd, buffer, strlen(buffer));
+    sprintf(w_buffer, "****************************************\n");
+    errno = write(sockfd, w_buffer, strlen(w_buffer));
     if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
-    sprintf(buffer, "%");
-    errno = write(sockfd, buffer, strlen(buffer));
+    sprintf(w_buffer, "%% \n");
+    errno = write(sockfd, w_buffer, strlen(w_buffer));
     if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
     
-    while(errno = read(sockfd, buffer, BUF_SIZE)){
+    while(1){
+        for(int j = 0; j < BUF_SIZE; j++) w_buffer[j] = '\0';
+        for(int j = 0; j < BUF_SIZE; j++) r_buffer[j] = '\0';
+
+        errno = read(sockfd, r_buffer, BUF_SIZE);
         if(errno < 0) error_exit("failed read(): %s\n", strerror(errno));
         else {
-            printf("receive from client: ");
-            fputs(buffer, stdout);
+            printf("receive from client: %s", r_buffer);
+            printf("message length: %d\n\n", strlen(r_buffer));
         }
-        sprintf(buffer, "%");
-        errno = write(sockfd, buffer, strlen(buffer));
+
+        if(strstr(r_buffer, "exit") != NULL){
+            break;
+        }
+
+        sprintf(w_buffer, "%% ");
+        errno = write(sockfd, w_buffer, strlen(w_buffer));
         if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
     }
 }
@@ -124,15 +134,17 @@ int main(int argc, char *argv[]){
         printf("Slave %d accept connection from %s:%d\n", slave, inet_ntoa(client_addr.sin_addr), (int)ntohs(client_addr.sin_port));
 
         //5.create slave processes to handle connections and pass slave sockets to the processes
-        switch(fork()){ //return 0 to child, pid to parent
+        int childpid;
+        switch(childpid = fork()){ //return 0 to child, pid to parent
             case -1: error_exit("failed fork(): %s\n", strerror(errno));
             case 0: //child
                     //6.interact with clients
+                    close(master); //child doesn't need to use parent socket
                     TCP_echo(slave);
                     close(slave);
                     exit(0); //child processes terminate successfully
             default: //parent
-                     //close(slave); //why?
+                     close(slave); //parent doesn't need to use child socket
                      break;
         }
 
