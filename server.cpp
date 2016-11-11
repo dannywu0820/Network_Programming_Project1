@@ -1,3 +1,5 @@
+#include"service.h"
+
 #include<stdio.h>
 #include<stdlib.h>
 #include<unistd.h>
@@ -17,11 +19,11 @@
 
 #define QUEUE_LEN 32 //maximum connection queue length
 #define BUF_SIZE 30000
-
+////////////////////////////////////////////////////////////////////////
 void Reaper(int sig){
     int status;
     
-    while(waitpid(-1, &status, WNOHANG) >= 0);
+    while(waitpid(-1, &status, WNOHANG) >= 0); //waitpid should return immediately instead of waiting
 }
 
 int errno; //error number used for strerror()
@@ -57,127 +59,20 @@ int passive_sock(const char *service, const char *transport, int q_len){
     if(strcmp(transport, "udp") == 0) sock_type = SOCK_DGRAM;
     else sock_type = SOCK_STREAM;
 
+    //1.create a master socket
     sock_fd = socket(AF_INET, sock_type, 0); //create socket
     if(sock_fd < 0) error_exit("failed socket(): %s\n", strerror(sock_fd));
 
+    //2.bind to an address(IP:port)
     errno = bind(sock_fd, (struct sockaddr *)&addr, sizeof(addr));
     if(errno < 0) error_exit("failed bind(): %s\n", service, strerror(errno));
     
+    //3.place the master in passive mode for accepting connection requests
     if(sock_type == SOCK_STREAM && listen(sock_fd, q_len) < 0){
         error_exit("failed listen(): %s\n", service, strerror(sock_type));
     }
  
     return sock_fd; 
-}
-
-void do_printenv(char *args[]){
-    char *result = getenv(args[1]);
-    //if(result == NULL) sprintf(result, "No Such env\n"); 
-    //return result;
-    printf("%s\n", result);
-}
-
-void do_setenv(char *args[]){
-    setenv(args[1], args[2], 1);
-}
-
-void serve(int sockfd){
-    char w_buffer[BUF_SIZE];
-    char r_buffer[BUF_SIZE];
-
-    //write welcome message to client
-    sprintf(w_buffer, "****************************************\n");
-    errno = write(sockfd, w_buffer, strlen(w_buffer));
-    if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
-    sprintf(w_buffer, "** Welcome to the information server. **\n");
-    errno = write(sockfd, w_buffer, strlen(w_buffer));
-    if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
-    sprintf(w_buffer, "****************************************\n");
-    errno = write(sockfd, w_buffer, strlen(w_buffer));
-    if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
-    sprintf(w_buffer, "%% ");
-    errno = write(sockfd, w_buffer, strlen(w_buffer));
-    if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
-    
-    while(1){
-        for(int j = 0; j < BUF_SIZE; j++) w_buffer[j] = '\0';
-        for(int j = 0; j < BUF_SIZE; j++) r_buffer[j] = '\0';   
-
-        //read recv_msg from client
-        errno = read(sockfd, r_buffer, BUF_SIZE);
-        for(int j = 0; j < strlen(r_buffer); j++){
-           if(r_buffer[j] == 13) r_buffer[j] = '\0';
-        }
-        if(errno < 0) error_exit("failed read(): %s\n", strerror(errno));
-        /*else {
-            printf("receive from client: %s\n", r_buffer);
-            printf("message length: %d\n\n", strlen(r_buffer));
-        }*/
-
-        //parsing recv_msg
-        char *args[100];
-        int argn = 0;
-        char *token_ptr;
-
-        for(int j = 0; j < 100; j++) args[j] = NULL;
-
-        token_ptr = strtok(r_buffer, " ");
-        while(token_ptr != NULL){
-            args[argn] = token_ptr;
-            argn++;
-            token_ptr = strtok(NULL, " ");
-        }
-
-        /*for(int j = 0; j < argn; j++){
-            printf("token[%d]:%s\n", j,args[j]);
-        }*/
-        
-        //executing commands
-        char *result_str = NULL;
-        if(strstr(r_buffer, "exit") != NULL){
-            break;
-        }
-
-        int status, bytes_read;
-        char buffer[BUF_SIZE];
-
-        int pipe1fd[2]; //[1]child->[0]parent
-        int pipe2fd[2]; //[0]
- 
-        if(pipe(pipe1fd) < 0 || pipe(pipe2fd) < 0){
-            printf("failed pipe()\n"); 
-            exit(-1);
-        }
-
-        if(strcmp(args[0], "setenv") == 0){ do_setenv(args);}
-        pid_t pid = fork();
-        if(pid < 0){ printf("failed fork()\n");  exit(-1); }
-        else if(pid == 0){ //child
-            close(pipe1fd[0]);
-            dup2(pipe1fd[1], STDOUT_FILENO);
-            if(strcmp(args[0], "printenv") == 0){ do_printenv(args); }
-            else{
-                errno = execvp(args[0], args);
-                if(errno < 0 && strcmp(args[0],"setenv") != 0) printf("Unknown Command: [%s]\n", args[0]);
-            }
-            exit(0);
-        }
-        else{ //parent
-            close(pipe1fd[1]);
-
-            bytes_read = read(pipe1fd[0], buffer, BUF_SIZE);
-            buffer[bytes_read] = '\0';
-            //printf("%s\n", buffer);
-            sprintf(w_buffer, buffer);
-            errno = write(sockfd, w_buffer, strlen(w_buffer));
-
-            waitpid(pid, &status, 0);
-        }
-
-        sprintf(w_buffer, "%% ");
-        errno = write(sockfd, w_buffer, strlen(w_buffer));
-        if(errno < 0) error_exit("failed write(): %s\n", strerror(errno));
-    }
 }
 
 int main(int argc, char *argv[]){
@@ -187,15 +82,15 @@ int main(int argc, char *argv[]){
     int master, slave; //master & slave sockfd
     unsigned int addrlen; //length of client's address
 
+    setenv("PATH", "bin:.", 1);
+    chdir("/net/gcs/105/0556503/ras/");
+    
     if(argc != 2) error_exit("usage: %s port\n", argv[0]);
-
     service = argv[1];
-    //1.create a master socket
-    //2.bind to an address(IP:port)
-    //3.place the master in passive mode for accepting connection requests
+    
     master = passive_sock(service, "tcp", QUEUE_LEN);
 
-    signal(SIGCHLD, Reaper); //prevent zombie process
+    signal(SIGCHLD, Reaper); //prevent zombie process, still needs to figure out the principle
 
     while(1){
         //4.repeatedly call accept() to receive connections and create slaves
@@ -206,21 +101,20 @@ int main(int argc, char *argv[]){
         }
         printf("Slave %d accept connection from %s:%d\n", slave, inet_ntoa(client_addr.sin_addr), (int)ntohs(client_addr.sin_port));
 
-        setenv("PATH", "bin:.", 1);
         //5.create slave processes to handle connections and pass slave sockets to the processes
         int childpid;
         switch(childpid = fork()){ //return 0 to child, pid to parent
             case -1: error_exit("failed fork(): %s\n", strerror(errno));
             case 0: //child
-                    chdir("/net/gcs/105/0556503/ras/");
                     printf("%s\n", getcwd(NULL, 0));
                     //6.interact with clients
-                    close(master); //child doesn't need to use parent socket
                     serve(slave);
+                    close(master); //child doesn't need to use parent sockfd
+                    //serve(slave);
                     close(slave);
                     exit(0); //child processes terminate successfully
             default: //parent
-                    close(slave); //parent doesn't need to use child socket
+                    close(slave); //parent doesn't need to use child sockfd
                     break;
         }
 
