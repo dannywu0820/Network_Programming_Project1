@@ -20,7 +20,7 @@
 #define BUF_SIZE 30000
 #define CMD_SIZE 2000
 struct cmd{
-    int prev; //0:first 1:"|" 2:">"
+    int type; //0:normal 1:|n 2:> xxx.txt 3:!n
     int argn;
     char *args[1800];
 };
@@ -69,14 +69,15 @@ void serve(int sockfd){
         int num_of_cmd;
         num_of_cmd = parse_received_msg(r_buffer, cmds);
 
-        /*printf("/////%d/////\n",num_of_cmd);
+        printf("/////%d/////\n",num_of_cmd);
         for(int j = 0; j < num_of_cmd; j++){
-            printf("cmd[%d]: ", j+1);
+            printf("cmd[%d] ", j+1);
+            printf("type%d: ", cmds[j].type);
             for(int k = 0; k < cmds[j].argn; k++){
                 printf("%s ", cmds[j].args[k]);
             }
             printf("\n");
-        }*/
+        }
        
         int result_fd = execute_cmds(num_of_cmd, cmds, sockfd);
         bzero(w_buffer, BUF_SIZE);
@@ -131,9 +132,19 @@ int parse_received_msg(char *r_buffer, struct cmd* cmds){
         
     for(int j = 0; j < num_of_cmd; j++){
         //printf("cmd[%d]: ", j+1);
+        bool skip_pipe = false;
         cmds[j].argn = 0;
+        if(token[cmdPos[j]][0] == '|' && strlen(token[cmdPos[j]]) == 1) skip_pipe = true;
+        if(token[cmdPos[j]][0] == '|' && !skip_pipe){ cmds[j].type = 1; }
+        else if(token[cmdPos[j]][0] == '>'){ cmds[j].type = 2; }
+        else if(token[cmdPos[j]][0] == '!'){ cmds[j].type = 3; }
+        else{ cmds[j].type = 0; }
         for(int k = cmdPos[j]; k < cmdPos[j+1]; k++){
             //printf("%s ", token[k]);
+            if(skip_pipe){
+                skip_pipe = false;
+                continue;
+            }
             cmds[j].args[cmds[j].argn] = token[k];
             cmds[j].argn++;    
         }
@@ -176,10 +187,14 @@ int execute_cmds(int num_of_cmd, struct cmd* cmds, int sockfd){
         next_input_fd = out_pipe[0];
     }
 
+    //change the value back to original stdin and stdout
+    dup2(stdin_fd, 0);
+    dup2(stdout_fd, 1);
+
     return input_fd;    
 }
 void execute_single_cmd(struct cmd command, int i, int input_fd, int output_fd){
-    /*char buffer[BUF_SIZE];
+    char buffer[BUF_SIZE];
     if(i == 0) sprintf(buffer, "%d", i);
     if(i != 0){
         read(input_fd, buffer, BUF_SIZE);
@@ -187,5 +202,5 @@ void execute_single_cmd(struct cmd command, int i, int input_fd, int output_fd){
         sscanf(buffer,"%s", s);
         sprintf(buffer, "%s%d", s, i);
     }
-    write(output_fd, buffer, strlen(buffer));*/
+    write(output_fd, buffer, strlen(buffer));
 }
