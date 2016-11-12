@@ -35,6 +35,8 @@ void do_setenv(char *args[]){
 }*/
 void send_welcome_msg(int sockfd, char *buffer);
 int parse_received_msg(char *r_buffer, struct cmd* cmds);
+int execute_cmds(int num_of_cmd, struct cmd* cmds, int sockfd);
+void execute_single_cmd(struct cmd command, int i, int input_fd, int output_fd);
 ////////////////////////////////////////////////////////////////////////////
 void serve(int sockfd){
     char w_buffer[BUF_SIZE], r_buffer[BUF_SIZE];
@@ -46,12 +48,13 @@ void serve(int sockfd){
     sprintf(w_buffer, "%% ");
     w_bytes = write(sockfd, w_buffer, strlen(w_buffer));
     while(1){
-        for(int j = 0; j < BUF_SIZE; j++){
+        /*for(int j = 0; j < BUF_SIZE; j++){
             w_buffer[j] = '\0';
             r_buffer[j] = '\0';
-        }
+        }*/
 
         //Step2.read messages from client
+        bzero(r_buffer, BUF_SIZE);
         r_bytes = read(sockfd, r_buffer, BUF_SIZE);
         for(int j = 0; j < strlen(r_buffer); j++){
            if(r_buffer[j] == 13) r_buffer[j] = '\0';
@@ -74,11 +77,17 @@ void serve(int sockfd){
             }
             printf("\n");
         }*/
-        
+       
+        int result_fd = execute_cmds(num_of_cmd, cmds, sockfd);
+        bzero(w_buffer, BUF_SIZE);
+        read(result_fd, w_buffer, BUF_SIZE);
+        write(sockfd, w_buffer, strlen(w_buffer));
+ 
         free(cmds);
 
         //Step4.
 
+        bzero(w_buffer, BUF_SIZE);
         sprintf(w_buffer, "%% ");
         w_bytes = write(sockfd, w_buffer, strlen(w_buffer));
         if(w_bytes < 0) printf("failed write()\n");
@@ -132,4 +141,51 @@ int parse_received_msg(char *r_buffer, struct cmd* cmds){
     }
     
     return num_of_cmd;
+}
+
+int execute_cmds(int num_of_cmd, struct cmd* cmds, int sockfd){
+    int out_pipe[2];
+    int result_pipe[2];
+
+    if(pipe(out_pipe) == -1) printf("failed pipe()\n");
+    if(pipe(result_pipe) == -1) printf("failed pipe()\n");
+
+    //save original fd of stdin, stdout, stderr
+    int stdin_fd = dup(0);
+    int stdout_fd = dup(1);
+    int stderr_fd = dup(2);
+
+    int input_fd = 0; //read args of current cmd from here
+    int output_fd = out_pipe[1]; //write the output of a command to this
+    int next_input_fd = out_pipe[0]; //read next cmd's input from here
+
+    for(int i = 0; i < num_of_cmd; i++){
+        //change the value of file descriptor table 0,1
+        //to the designated fd as new stdin and stdout
+        dup2(input_fd, 0);
+        dup2(output_fd, 1);
+
+        execute_single_cmd(cmds[i], i,input_fd, output_fd);
+
+        if(i != 0) close(input_fd); //can't close stdin
+        close(output_fd);
+    
+        if(pipe(out_pipe) == -1) printf("failed pipe()\n");
+        input_fd = next_input_fd;
+        output_fd = out_pipe[1];
+        next_input_fd = out_pipe[0];
+    }
+
+    return input_fd;    
+}
+void execute_single_cmd(struct cmd command, int i, int input_fd, int output_fd){
+    /*char buffer[BUF_SIZE];
+    if(i == 0) sprintf(buffer, "%d", i);
+    if(i != 0){
+        read(input_fd, buffer, BUF_SIZE);
+        char *s;
+        sscanf(buffer,"%s", s);
+        sprintf(buffer, "%s%d", s, i);
+    }
+    write(output_fd, buffer, strlen(buffer));*/
 }
