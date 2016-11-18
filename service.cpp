@@ -82,6 +82,7 @@ void serve(int sockfd){
         int result_fd = execute_cmds(num_of_cmd, cmds, sockfd);
         bzero(w_buffer, BUF_SIZE);
         read(result_fd, w_buffer, BUF_SIZE);
+        //w_buffer[strlen(w_buffer)] = '\n';
         write(sockfd, w_buffer, strlen(w_buffer));
  
         free(cmds);
@@ -149,6 +150,7 @@ int parse_received_msg(char *r_buffer, struct cmd* cmds){
             cmds[j].argn++;    
         }
         //printf("\n");
+        cmds[j].args[cmds[j].argn] = 0;
     }
     
     return num_of_cmd;
@@ -195,12 +197,40 @@ int execute_cmds(int num_of_cmd, struct cmd* cmds, int sockfd){
 }
 void execute_single_cmd(struct cmd command, int i, int input_fd, int output_fd){
     char buffer[BUF_SIZE];
-    if(i == 0) sprintf(buffer, "%d", i);
-    if(i != 0){
-        read(input_fd, buffer, BUF_SIZE);
-        char *s;
-        sscanf(buffer,"%s", s);
-        sprintf(buffer, "%s%d", s, i);
+    bzero(buffer,BUF_SIZE);
+
+    if(command.type == 0){
+        if(strcmp(command.args[0], "printenv") == 0){
+            char* result = getenv(command.args[1]);
+            sprintf(buffer, "%s\n", result);
+            write(output_fd, buffer, strlen(buffer));
+        }
+        else if(strcmp(command.args[0], "setenv") == 0){
+            setenv(command.args[1], command.args[2], 1);
+            write(output_fd, buffer, strlen(buffer));
+        }
+        else{
+            pid_t pid= fork();
+            int status;
+            if(pid < 0){ exit(1); }
+            else if(pid == 0){ //child
+                execvp(command.args[0], command.args);
+                char error_msg[100];
+                sprintf(error_msg, "Unknown command:[%s]\n", command.args[0]);
+                write(output_fd, error_msg, strlen(error_msg));
+                exit(1);
+            }
+            else{ //parent
+                waitpid(pid, &status, 0);
+            }
+        }
     }
-    write(output_fd, buffer, strlen(buffer));
+    else if(command.type == 1){
+
+    }
+    else if(command.type == 2){
+
+    }
+    else{ // > XXX.txt
+    }
 }
