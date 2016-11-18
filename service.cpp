@@ -137,8 +137,8 @@ int parse_received_msg(char *r_buffer, struct cmd* cmds){
         cmds[j].argn = 0;
         if(token[cmdPos[j]][0] == '|' && strlen(token[cmdPos[j]]) == 1) skip_pipe = true;
         if(token[cmdPos[j]][0] == '|' && !skip_pipe){ cmds[j].type = 1; }
-        else if(token[cmdPos[j]][0] == '>'){ cmds[j].type = 2; }
-        else if(token[cmdPos[j]][0] == '!'){ cmds[j].type = 3; }
+        else if(token[cmdPos[j]][0] == '!'){ cmds[j].type = 2; }
+        else if(token[cmdPos[j]][0] == '>'){ cmds[j].type = 3; }
         else{ cmds[j].type = 0; }
         for(int k = cmdPos[j]; k < cmdPos[j+1]; k++){
             //printf("%s ", token[k]);
@@ -225,12 +225,15 @@ void execute_single_cmd(struct cmd command, int i, int input_fd, int output_fd){
             }
         }
     }
-    else if(command.type == 1){
+    else if(command.type == 1){ //|n
 
     }
-    else if(command.type == 2){
+    else if(command.type == 2){ //!n
 
     }
-    else{ // > XXX.txt
+    else{ //>
+        FILE* fptr = fopen(command.args[1], "w");
+        read(input_fd, buffer, BUF_SIZE);
+        write(fileno(fptr), buffer, strlen(buffer));
     }
 }
