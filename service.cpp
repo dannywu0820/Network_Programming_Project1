@@ -16,6 +16,7 @@
 #include<sys/errno.h>
 #include<sys/resource.h>
 #include<stdarg.h>
+#include<fcntl.h>
 
 #include<vector>
 using namespace std;
@@ -39,7 +40,7 @@ vector<struct record> table;
 void send_welcome_msg(int sockfd, char *buffer);
 int parse_received_msg(char *r_buffer, struct cmd* cmds);
 int execute_cmds(int num_of_cmd, struct cmd* cmds, int sockfd);
-void execute_single_cmd(struct cmd command, int i, int input_fd, int output_fd, int stdout_fd, bool input_from_past);
+void execute_single_cmd(struct cmd command, int i, int input_fd, int output_fd, int stdout_fd, bool input_from_past, int err_input_fd);
 
 int read_previous_pipe();
 ////////////////////////////////////////////////////////////////////////////
@@ -160,9 +161,11 @@ int parse_received_msg(char *r_buffer, struct cmd* cmds){
 
 int execute_cmds(int num_of_cmd, struct cmd* cmds, int sockfd){
     int out_pipe[2];
+    int err_pipe[2];
     int result_pipe[2];
 
     if(pipe(out_pipe) == -1) printf("failed pipe()\n");
+    if(pipe(err_pipe) == -1) printf("failed pipe()\n");
     if(pipe(result_pipe) == -1) printf("failed pipe()\n");
 
     //save original fd of stdin, stdout, stderr
@@ -174,16 +177,20 @@ int execute_cmds(int num_of_cmd, struct cmd* cmds, int sockfd){
     bool input_from_previous_pipe = (input_fd == 0)?false:true;
     int output_fd = out_pipe[1]; //write the output of a command to this
     int next_input_fd = out_pipe[0]; //read next cmd's input from here
+    int err_input_fd = err_pipe[0];
+    int err_output_fd = err_pipe[1];
 
     for(int i = 0; i < num_of_cmd; i++){
         //change the value of file descriptor table 0,1
         //to the designated fd as new stdin and stdout
         dup2(input_fd, 0);
         dup2(output_fd, 1);
+        dup2(err_output_fd, 2);
 
-        execute_single_cmd(cmds[i], i,input_fd, output_fd, stdout_fd, input_from_previous_pipe);
+        execute_single_cmd(cmds[i], i,input_fd, output_fd, stdout_fd, input_from_previous_pipe, result_pipe[0]);
         input_from_previous_pipe = false; //used when i==0
 
+        //stdin,stdout
         if(i != 0) close(input_fd); //can't close stdin
         close(output_fd);
     
@@ -191,11 +198,28 @@ int execute_cmds(int num_of_cmd, struct cmd* cmds, int sockfd){
         input_fd = next_input_fd;
         output_fd = out_pipe[1];
         next_input_fd = out_pipe[0];
+
+        //stderr
+        char err_buffer[BUF_SIZE];
+        bzero(err_buffer, BUF_SIZE);
+        //turn read into non-blocking
+        int original_flags = fcntl(err_input_fd, F_GETFL, 0);
+        fcntl(err_input_fd, F_SETFL, original_flags|O_NONBLOCK);
+        read(err_input_fd, err_buffer, BUF_SIZE);
+        write(result_pipe[1], err_buffer, strlen(err_buffer));
+
+        close(err_input_fd);
+        close(err_output_fd);
+
+        if(pipe(err_pipe) == -1) printf("failed pipe()\n");
+        err_input_fd = err_pipe[0];
+        err_output_fd = err_pipe[1];
     }
 
     //change the value back to original stdin and stdout
     dup2(stdin_fd, 0);
     dup2(stdout_fd, 1);
+    dup2(stderr_fd, 2);
 
     vector<struct record>::iterator it;
     printf("talbe size:%d\n",table.size());
@@ -204,9 +228,18 @@ int execute_cmds(int num_of_cmd, struct cmd* cmds, int sockfd){
     }
     printf("/////////////\n");
 
-    return input_fd;    
+    char input_buffer[BUF_SIZE];
+    bzero(input_buffer, BUF_SIZE);
+    int flags = fcntl(input_fd, F_GETFL, 0);
+    fcntl(input_fd, F_SETFL, flags|O_NONBLOCK);
+    read(input_fd, input_buffer, BUF_SIZE);
+    write(result_pipe[1], input_buffer, strlen(input_buffer));
+    close(result_pipe[1]);
+
+    //return input_fd;    
+    return result_pipe[0];    
 }
-void execute_single_cmd(struct cmd command, int i, int input_fd, int output_fd, int stdout_fd, bool input_from_past){
+void execute_single_cmd(struct cmd command, int i, int input_fd, int output_fd, int stdout_fd, bool input_from_past, int err_input_fd){
     char buffer[BUF_SIZE];
     bzero(buffer,BUF_SIZE);
 
@@ -285,7 +318,44 @@ void execute_single_cmd(struct cmd command, int i, int input_fd, int output_fd, 
         }
     }
     else if(command.type == 2){ //!n
+        int count;
+        sscanf(command.args[0], "!%d", &count);
+        
+        bool create_new_pipe = true;
+        vector<struct record>::iterator it;
+        for(it = table.begin(); it != table.end(); it++){
+            if(it->count_down == count){
+                create_new_pipe = false;
+                break;
+            }
+        }
 
+        int newpipe_fd[2];
+        if(create_new_pipe){
+            //create a new pipe;
+            pipe(newpipe_fd);
+            //record the new pipe information
+            struct record temp;
+            temp.count_down = count;
+            temp.readOnly_fd = newpipe_fd[0];
+            temp.writeOnly_fd = newpipe_fd[1];
+            table.push_back(temp);
+        }
+        
+        //read from input_fd and write to output_fd
+        char err_buffer[BUF_SIZE];
+        bzero(err_buffer, BUF_SIZE);
+        read(err_input_fd, err_buffer, BUF_SIZE);
+        read(input_fd, buffer, BUF_SIZE);
+        //write(output_fd, buffer, strlen(buffer));
+        if(create_new_pipe){
+            write(newpipe_fd[1], err_buffer, strlen(err_buffer));
+            write(newpipe_fd[1], buffer, strlen(buffer));
+        }
+        else{
+            write(it->writeOnly_fd, err_buffer, strlen(err_buffer));
+            write(it->writeOnly_fd, buffer, strlen(buffer));
+        }
     }
     else{ //>
         FILE* fptr = fopen(command.args[1], "w");
